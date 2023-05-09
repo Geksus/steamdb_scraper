@@ -1,16 +1,9 @@
-from selenium.webdriver.chrome import webdriver
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from time import sleep
-from selenium.webdriver.common.action_chains import ActionChains
 import csv
+import requests
+from bs4 import BeautifulSoup
+import lxml
+from datetime import datetime
 
-
-# driver = webdriver.Chrome()
-# action = ActionChains(driver)
 
 BASE_URL = "https://steamdb.info/"
 instant_search_urls = [f"{BASE_URL}instantsearch/?page={idx}" for idx in range(1, 26)]
@@ -46,8 +39,87 @@ for i in range(1, 26):
     var_name = f"results_{i}"
     items.append(locals()[var_name])
 
-data = {}
+num = 0
+data = []
 for item in items:
-    for name in item["hits"]:
-        print(name['name'])
+    for i in item["hits"]:
+        temp = {}
+        try:
+            temp['App ID'] = i['objectID']
+        except:
+            temp['App ID'] = ''
+        try:
+            temp['Name'] = i['name']
+        except:
+            temp['Name'] = ''
+        try:
+            response = requests.get('https://store.steampowered.com/app/' + temp['App ID'])
+            soup = BeautifulSoup(response.text, 'lxml')
+            temp['Developer'] = soup.find(id='developers_list').text.strip()
+            try:
+                publishers = soup.find_all('div', class_='subtitle column')
+                for p in publishers:
+                    if 'Publisher' in p.text:
+                        temp['Publisher'] = p.find_next('a').text
+            except:
+                temp['Publisher'] = ''
+            try:
+                temp['Release date'] = soup.find('div', class_='release_date').find_next('div', class_='date').text
+            except:
+                temp['Release date'] = ''
+            try:
+                temp['Description'] = soup.find(id='game_area_description').text.strip().strip('About This Game').strip()
+            except:
+                temp['Description'] = ''
+            try:
+                temp['Positive reviews'] = soup.find(id='review_type_positive').find_next('span').text.strip('()')
+            except:
+                temp['Positive reviews'] = ''
+            try:
+                temp['Negative reviews'] = soup.find(id='review_type_negative').find_next('span').text.strip('()')
+            except:
+                temp['Negative reviews'] = ''
+        except:
+            temp['Developer'] = ''
+        try:
+            temp['url'] = f"{BASE_URL}app/{i['objectID']}"
+        except:
+            temp['url'] = ''
+        try:
+            temp['Last updated'] = datetime.fromtimestamp(i['lastUpdated']).strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            temp['Last updated'] = ''
+        try:
+            temp['Supported systems'] = ", ".join(i['oslist'])
+        except:
+            temp['Supported systems'] = ''
+        try:
+            temp['Price'] = float(i['price_us'])
+        except:
+            temp['Price'] = ''
+        try:
+            temp['User score'] = float(i['userScore'])
+        except:
+            temp['User score'] = ''
+        try:
+            players = requests.get(f'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid={temp["App ID"]}')
+            if players.status_code == 200:
+                # Extract the number of players from the response
+                info = players.json()['response']
+                temp['Currently playing'] = info['player_count']
+        except:
+            temp['Currently playing'] = ''
+        data.append(temp)
+        num += 1
+        print(num)
 
+print(data)
+
+headers = ['App ID', 'Name', 'Developer', 'Publisher', 'Release date', 'Description', 'Positive reviews', 'Negative reviews', 'url', 'Last updated', 'Supported systems', 'Price', 'User score', 'Currently playing']
+
+# Write the data to a CSV file
+with open('steamdb_instant_search.csv', 'w', newline='', encoding='utf-8') as csvfile:
+    writer = csv.DictWriter(csvfile, fieldnames=headers)
+    writer.writeheader()
+    for row in data:
+        writer.writerow(row)
